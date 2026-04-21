@@ -16,9 +16,9 @@ classifiers = [
 dependencies = { file = ["requirements.txt"] }
 
 [project.urls]
-Repository = "https://github.com/altera2ion/ComfyUI-Altera2ion-Loader"
+Repository = "https://github.com/hemantjindal/ComfyUI-Altera2ion-Loader"
 Documentation = "https://www.altera2ion.com/comfy-setup"
-"Bug Tracker" = "https://github.com/altera2ion/ComfyUI-Altera2ion-Loader/issues"
+"Bug Tracker" = "https://github.com/hemantjindal/ComfyUI-Altera2ion-Loader/issues"
 
 [tool.comfy]
 PublisherId = "altera2ion"

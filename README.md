@@ -29,7 +29,7 @@ Clone this repository into your ComfyUI custom nodes folder:
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/altera2ion/ComfyUI-Altera2ion-Loader.git
+git clone https://github.com/hemantjindal/ComfyUI-Altera2ion-Loader.git
 ```
 
 Install dependencies:
