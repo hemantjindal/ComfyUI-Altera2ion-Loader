@@ -18,10 +18,15 @@ import webbrowser
 from datetime import datetime
 
 from cryptography.fernet import Fernet
-from safetensors.torch import load as safetensors_load
 
 
-CONFIG_DIR = os.path.join(os.path.dirname(__file__), ".altera2ion")
+NODE_DIR = os.path.dirname(__file__)
+LEGACY_CONFIG_DIR = os.path.join(NODE_DIR, ".altera2ion")
+USER_CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".altera2ion", "comfyui")
+CONFIG_DIR = (
+    os.environ.get("ALTERA2ION_CONFIG_DIR")
+    or (LEGACY_CONFIG_DIR if os.path.exists(os.path.join(LEGACY_CONFIG_DIR, "activation.json")) else USER_CONFIG_DIR)
+)
 CONFIG_FILE = os.path.join(CONFIG_DIR, "activation.json")
 
 API_BASE = "https://www.altera2ion.com/api"
@@ -34,6 +39,13 @@ PRODUCT_HINTS = {
     "interior-adaptation": ("interior", "adaptation"),
     "dreamy": ("dreamy",),
     "re2form": ("re2form",),
+}
+
+PRODUCT_LORA_FILES = {
+    "exterior-adaptation": "Exterior_Adaptation_LoRA.a2enc",
+    "interior-adaptation": "Interior_Adaptation_LoRA.a2enc",
+    "dreamy": "Dreamy_Style_LoRA.a2enc",
+    "re2form": "Re2Form_LoRA.a2enc",
 }
 
 
@@ -65,6 +77,85 @@ def get_machine_id():
 
 def ensure_config_dir():
     os.makedirs(CONFIG_DIR, exist_ok=True)
+
+
+def get_comfy_root():
+    return os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+
+
+def get_lora_dir():
+    return os.path.join(get_comfy_root(), "models", "loras")
+
+
+def get_lora_cache_dir():
+    return os.path.join(CONFIG_DIR, "lora-cache")
+
+
+def sanitize_lora_name(lora_name):
+    safe_name = os.path.basename(str(lora_name or "").replace("\\", "/"))
+
+    if not safe_name.endswith(".a2enc"):
+        raise RuntimeError("[ALTERA2ION] Encrypted LoRA file names must end with .a2enc.")
+
+    return safe_name
+
+
+def get_lora_options():
+    lora_dir = get_lora_dir()
+    enc_files = set(PRODUCT_LORA_FILES.values())
+
+    if os.path.isdir(lora_dir):
+        for file_name in os.listdir(lora_dir):
+            if file_name.endswith(".a2enc"):
+                enc_files.add(file_name)
+
+    return sorted(enc_files)
+
+
+def find_existing_lora_path(lora_name):
+    safe_name = sanitize_lora_name(lora_name)
+    candidates = [
+        os.path.join(get_lora_dir(), safe_name),
+        os.path.join(get_lora_cache_dir(), safe_name),
+    ]
+
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+
+    return None
+
+
+def get_preferred_lora_download_path(lora_name):
+    safe_name = sanitize_lora_name(lora_name)
+
+    for directory in [get_lora_dir(), get_lora_cache_dir()]:
+        test_handle = None
+        test_path = None
+
+        try:
+            os.makedirs(directory, exist_ok=True)
+            test_handle = tempfile.NamedTemporaryFile(
+                "wb",
+                dir=directory,
+                prefix=".tmp-altera2ion-write-test-",
+                delete=False,
+            )
+            test_path = test_handle.name
+            test_handle.close()
+            os.remove(test_path)
+            return os.path.join(directory, safe_name)
+        except OSError:
+            if test_handle and not test_handle.closed:
+                test_handle.close()
+            if test_path and os.path.exists(test_path):
+                try:
+                    os.remove(test_path)
+                except OSError:
+                    pass
+            continue
+
+    raise RuntimeError("[ALTERA2ION] Unable to create a writable LoRA cache directory.")
 
 
 def write_json_atomic(path, data):
@@ -157,6 +248,16 @@ def clear_product_state(state):
         "pending_browser_opened_at",
     ]:
         state.pop(key, None)
+
+
+def has_valid_activation_token(state):
+    token = state.get("activation_token")
+    expires_at = state.get("activation_token_expires_at")
+
+    if not token or not expires_at:
+        return False
+
+    return parse_iso_timestamp(expires_at) > now_timestamp()
 
 
 def ensure_machine_state(config):
@@ -256,6 +357,69 @@ def request_decrypt_key(activation_token, activation_secret, machine_id, product
         return data, None, status
 
     return None, error or "Unable to fetch decrypt key.", status
+
+
+def download_encrypted_lora(activation_token, activation_secret, machine_id, product_slug, lora_name):
+    target_path = get_preferred_lora_download_path(lora_name)
+    target_dir = os.path.dirname(target_path)
+    body = json.dumps({
+        "activation_token": activation_token,
+        "activation_secret": activation_secret,
+        "machine_id": machine_id,
+        "product_slug": product_slug,
+    }).encode("utf8")
+    request = urllib.request.Request(
+        f"{API_BASE}/activations/lora",
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/octet-stream",
+            "User-Agent": "ALTERA2ION-ComfyUI/2.1",
+        },
+        method="POST",
+    )
+    handle = None
+    temp_path = None
+
+    try:
+        with urllib.request.urlopen(request, timeout=300) as response:
+            handle = tempfile.NamedTemporaryFile(
+                "wb",
+                dir=target_dir,
+                prefix=".tmp-altera2ion-lora-",
+                suffix=".a2enc",
+                delete=False,
+            )
+            temp_path = handle.name
+
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                handle.write(chunk)
+
+            handle.flush()
+            handle.close()
+            os.replace(temp_path, target_path)
+            return target_path, None, response.status
+    except urllib.error.HTTPError as error:
+        body_text = error.read().decode("utf8", errors="replace")
+        try:
+            data = json.loads(body_text) if body_text else {}
+        except Exception:
+            data = {"error": body_text}
+        message = data.get("error") or body_text or f"HTTP {error.code}"
+        return None, message, error.code
+    except Exception as error:
+        return None, f"Connection error: {error}", None
+    finally:
+        if handle and not handle.closed:
+            handle.close()
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 
 def decrypt_lora_bytes(enc_path, key_bytes):
@@ -358,12 +522,12 @@ def exchange_activation_for_decrypt_key(state, activation_secret, machine_id, pr
     return None, error
 
 
-def activate_and_get_key(config, product_slug):
+def activate_and_get_key(config, product_slug, require_activation_token=False):
     machine_id, machine_name, activation_secret = ensure_machine_state(config)
     state = get_product_state(config, product_slug)
 
     cached_key = get_valid_cached_decrypt_key(state)
-    if cached_key:
+    if cached_key and (not require_activation_token or has_valid_activation_token(state)):
         return cached_key.encode("utf8")
 
     if state.get("activation_token"):
@@ -443,6 +607,36 @@ def activate_and_get_key(config, product_slug):
     )
 
 
+def ensure_encrypted_lora_file(config, product_slug, lora_name):
+    existing_path = find_existing_lora_path(lora_name)
+
+    if existing_path:
+        return existing_path
+
+    machine_id, _machine_name, activation_secret = ensure_machine_state(config)
+    state = get_product_state(config, product_slug)
+    activation_token = state.get("activation_token")
+
+    if not activation_token or not has_valid_activation_token(state):
+        raise RuntimeError("[ALTERA2ION] Activation is required before this LoRA can be downloaded.")
+
+    lora_path, error, status = download_encrypted_lora(
+        activation_token,
+        activation_secret,
+        machine_id,
+        product_slug,
+        lora_name,
+    )
+
+    if lora_path:
+        return lora_path
+
+    if status in (403, 404, 410):
+        clear_product_state(state)
+
+    raise RuntimeError(f"[ALTERA2ION] Unable to download encrypted LoRA: {error}")
+
+
 class Altera2ionLoRALoader:
     CATEGORY = "ALTERA2ION"
     FUNCTION = "load_lora"
@@ -451,20 +645,7 @@ class Altera2ionLoRALoader:
 
     @classmethod
     def INPUT_TYPES(cls):
-        lora_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "models",
-            "loras",
-        )
-        enc_files = []
-
-        if os.path.isdir(lora_dir):
-            for file_name in os.listdir(lora_dir):
-                if file_name.endswith(".a2enc"):
-                    enc_files.append(file_name)
-
-        if not enc_files:
-            enc_files = ["no_encrypted_lora_found"]
+        enc_files = get_lora_options()
 
         return {
             "required": {
@@ -481,23 +662,13 @@ class Altera2ionLoRALoader:
         }
 
     def load_lora(self, model, clip, lora_name, strength_model, strength_clip):
-        if lora_name == "no_encrypted_lora_found":
-            raise RuntimeError(
-                "No .a2enc files found in models/loras/. "
-                "Place your encrypted LoRA file there."
-            )
-
+        lora_name = sanitize_lora_name(lora_name)
         product_slug = infer_product_slug(lora_name)
+        enc_path = find_existing_lora_path(lora_name)
         config = load_config()
-        decrypt_key = activate_and_get_key(config, product_slug)
+        decrypt_key = activate_and_get_key(config, product_slug, require_activation_token=not bool(enc_path))
+        enc_path = ensure_encrypted_lora_file(config, product_slug, lora_name)
         save_config(config)
-
-        lora_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "models",
-            "loras",
-        )
-        enc_path = os.path.join(lora_dir, lora_name)
 
         try:
             raw_bytes = decrypt_lora_bytes(enc_path, decrypt_key)
@@ -505,6 +676,8 @@ class Altera2ionLoRALoader:
             raise RuntimeError(
                 f"[ALTERA2ION] Decryption failed - invalid activation or corrupted file. {error}"
             )
+
+        from safetensors.torch import load as safetensors_load
 
         lora_data = safetensors_load(raw_bytes)
 

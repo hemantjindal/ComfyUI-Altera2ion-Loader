@@ -10,6 +10,7 @@ ALTERA2ION LoRA files, decrypt keys, product packages, or customer assets.
 - Loads ALTERA2ION `.a2enc` encrypted LoRA files.
 - Starts the ALTERA2ION account activation flow when access is required.
 - Verifies product ownership through `altera2ion.com`.
+- Downloads the encrypted `.a2enc` file from ALTERA2ION when it is not already present locally.
 - Decrypts the LoRA in memory before applying it to the model and CLIP.
 
 ## Installation
@@ -43,11 +44,14 @@ Restart ComfyUI.
 ## Usage
 
 1. Purchase an ALTERA2ION package from `https://www.altera2ion.com`.
-2. Place the encrypted `.a2enc` LoRA file in `ComfyUI/models/loras/`.
-3. Open a workflow that uses **ALTERA2ION LoRA Loader**.
+2. Open a workflow that uses **ALTERA2ION LoRA Loader**.
+3. Select the encrypted `.a2enc` LoRA name in the loader node.
 4. Queue the prompt.
 5. Sign in on the ALTERA2ION activation page with the account that owns the product.
 6. Approve the session and return to ComfyUI.
+
+If the encrypted `.a2enc` file is already in `ComfyUI/models/loras/`, the node uses it.
+If it is missing, the node downloads the encrypted `.a2enc` from ALTERA2ION after activation.
 
 No license key is pasted into the node.
 
@@ -59,7 +63,6 @@ LoRA files and the server-side entitlement/decrypt-key flow.
 The node is not useful without:
 
 - a purchased ALTERA2ION product,
-- an encrypted `.a2enc` LoRA file,
 - a valid ALTERA2ION activation,
 - a server-issued decrypt key.
 
