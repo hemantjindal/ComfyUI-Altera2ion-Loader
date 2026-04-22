@@ -24,12 +24,11 @@ NODE_DIR = os.path.dirname(__file__)
 LEGACY_CONFIG_DIR = os.path.join(NODE_DIR, ".altera2ion")
 USER_CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".altera2ion", "comfyui")
 CONFIG_DIR = (
-    os.environ.get("ALTERA2ION_CONFIG_DIR")
-    or (LEGACY_CONFIG_DIR if os.path.exists(os.path.join(LEGACY_CONFIG_DIR, "activation.json")) else USER_CONFIG_DIR)
+    LEGACY_CONFIG_DIR if os.path.exists(os.path.join(LEGACY_CONFIG_DIR, "activation.json")) else USER_CONFIG_DIR
 )
 CONFIG_FILE = os.path.join(CONFIG_DIR, "activation.json")
 
-API_BASE = os.environ.get("ALTERA2ION_API_BASE", "https://www.altera2ion.com/api").rstrip("/")
+API_BASE = "https://www.altera2ion.com/api"
 ACTIVATION_POLL_INTERVAL_SECONDS = 3
 ACTIVATION_WAIT_SECONDS = 45
 DECRYPT_KEY_OFFLINE_GRACE_HOURS = 24
@@ -62,12 +61,7 @@ def parse_iso_timestamp(value):
 
 
 def get_machine_name():
-    return (
-        os.environ.get("COMPUTERNAME")
-        or os.environ.get("HOSTNAME")
-        or platform.node()
-        or "Unknown PC"
-    )[:255]
+    return (platform.node() or "Unknown PC")[:255]
 
 
 def get_machine_id():
@@ -177,10 +171,6 @@ def write_json_atomic(path, data):
         handle.flush()
         handle.close()
         os.replace(temp_path, path)
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
     finally:
         if handle and not handle.closed:
             handle.close()

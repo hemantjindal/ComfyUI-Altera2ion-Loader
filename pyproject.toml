@@ -1,19 +1,19 @@
 [project]
 name = "altera2ion-loader"
-version = "1.1.0"
+version = "1.1.1"
 description = "Licensed encrypted LoRA loader for ALTERA2ION ComfyUI packages."
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
-dynamic = ["dependencies"]
+dependencies = [
+    "cryptography>=41.0.0",
+    "safetensors>=0.4.0"
+]
 classifiers = [
     "Operating System :: OS Independent",
     "Environment :: GPU :: NVIDIA CUDA",
     "Environment :: GPU :: AMD ROCm",
     "Environment :: GPU :: Apple Metal"
 ]
-
-[tool.setuptools.dynamic]
-dependencies = { file = ["requirements.txt"] }
 
 [project.urls]
 Repository = "https://github.com/hemantjindal/ComfyUI-Altera2ion-Loader"
