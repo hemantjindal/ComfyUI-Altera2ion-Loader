@@ -29,7 +29,7 @@ CONFIG_DIR = (
 )
 CONFIG_FILE = os.path.join(CONFIG_DIR, "activation.json")
 
-API_BASE = "https://www.altera2ion.com/api"
+API_BASE = os.environ.get("ALTERA2ION_API_BASE", "https://www.altera2ion.com/api").rstrip("/")
 ACTIVATION_POLL_INTERVAL_SECONDS = 3
 ACTIVATION_WAIT_SECONDS = 45
 DECRYPT_KEY_OFFLINE_GRACE_HOURS = 24
